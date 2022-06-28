@@ -382,6 +382,18 @@ public class TransmittableThreadLocal<T> extends InheritableThreadLocal<T> imple
     }
 
     /**
+     * TransmittableThreadLocal.Transmitter 将当前线程的所有 TransmittableThreadLocal 和注册的 ThreadLocal 值传输给其他线程。
+     *
+     * // 捕获  -> 重放 -> 恢复
+     * 通过静态方法 capture() => replay(Object) => restore(Object) 完成传输（又名 CRR 操作）； ThreadLocal 实例由 registerThreadLocal 注册）。
+     * TransmittableThreadLocal.Transmitter 是用于框架/中间件集成的内部操作 api； 一般来说，您永远不会在 biz/应用程序代码中使用它！
+     *
+     *
+     * 当然，replay(Object) 和 restore(Object) 操作可以通过实用方法 runCallableWithCaptured(Object, Callable)
+     * 或 runSupplierWithCaptured(Object, Supplier) 和可爱的 Java 8 lambda 语法来简化。
+     *
+     */
+    /**
      * {@link Transmitter} transmit all {@link TransmittableThreadLocal}
      * and registered {@link ThreadLocal} values of the current thread to other thread.
      * <p>
@@ -398,27 +410,33 @@ public class TransmittableThreadLocal<T> extends InheritableThreadLocal<T> imple
      * <pre>{@code
      * ///////////////////////////////////////////////////////////////////////////
      * // in thread A, capture all TransmittableThreadLocal values of thread A
+     * // 在线程 A 中，捕获线程 A 的所有 TransmittableThreadLocal 值
      * ///////////////////////////////////////////////////////////////////////////
      *
      * Object captured = Transmitter.capture(); // (1)
      *
      * ///////////////////////////////////////////////////////////////////////////
      * // in thread B
+     * // 在线程 B
      * ///////////////////////////////////////////////////////////////////////////
      *
      * // replay all TransmittableThreadLocal values from thread A
+     * // 重放来自线程 A 的所有 TransmittableThreadLocal 值
      * Object backup = Transmitter.replay(captured); // (2)
      * try {
      *     // your biz logic, run with the TransmittableThreadLocal values of thread B
+     *     // 您的业务逻辑，使用线程 B 的 TransmittableThreadLocal 值运行
      *     System.out.println("Hello");
      *     // ...
      *     return "World";
      * } finally {
      *     // restore the TransmittableThreadLocal of thread B when replay
+     *     // replay时恢复线程B的TransmittableThreadLocal
      *     Transmitter.restore(backup); // (3)
      * }}</pre>
      * <p>
      * see the implementation code of {@link TtlRunnable} and {@link TtlCallable} for more actual code samples.
+     * // 更多实际代码示例请参见 {@link TtlRunnable} 和 {@link TtlCallable} 的实现代码。
      * <p>
      * Of course, {@link #replay(Object)} and {@link #restore(Object)} operation can be simplified by util methods
      * {@link #runCallableWithCaptured(Object, Callable)} or {@link #runSupplierWithCaptured(Object, Supplier)}
@@ -481,6 +499,10 @@ public class TransmittableThreadLocal<T> extends InheritableThreadLocal<T> imple
      * @since 2.3.0
      */
     public static class Transmitter {
+
+        /**
+         * 捕获当前线程中的所有 TransmittableThreadLocal 和注册的 ThreadLocal 值。
+         */
         /**
          * Capture all {@link TransmittableThreadLocal} and registered {@link ThreadLocal} values in the current thread.
          *
@@ -489,12 +511,22 @@ public class TransmittableThreadLocal<T> extends InheritableThreadLocal<T> imple
          */
         @NonNull
         public static Object capture() {
+            // 创建一个快照
+            // 参数1
             return new Snapshot(captureTtlValues(), captureThreadLocalValues());
         }
 
+        /**
+         * 捕获 ttlvalue
+         * @return
+         */
         private static HashMap<TransmittableThreadLocal<Object>, Object> captureTtlValues() {
+            // 创建一个
             HashMap<TransmittableThreadLocal<Object>, Object> ttl2Value = new HashMap<>();
+            // 从当前holder 中获取存放的  TransmittableThreadLocal
             for (TransmittableThreadLocal<Object> threadLocal : holder.get().keySet()) {
+                // 注意copyValue 方法， 调用了 threadLocal 的get 方法，并且使用了 copy 方法
+                // copy 方法默认实现是 parentvalue 是引用，直接获取过来了。（不是新建了一个对象）
                 ttl2Value.put(threadLocal, threadLocal.copyValue());
             }
             return ttl2Value;
@@ -512,6 +544,10 @@ public class TransmittableThreadLocal<T> extends InheritableThreadLocal<T> imple
         }
 
         /**
+         * 从 capture() 中重放捕获的 TransmittableThreadLocal 和注册的 ThreadLocal 值，
+         * 并在重放前返回当前线程中备份的 TransmittableThreadLocal 值。
+         */
+        /**
          * Replay the captured {@link TransmittableThreadLocal} and registered {@link ThreadLocal} values from {@link #capture()},
          * and return the backup {@link TransmittableThreadLocal} values in the current thread before replay.
          *
@@ -523,9 +559,15 @@ public class TransmittableThreadLocal<T> extends InheritableThreadLocal<T> imple
         @NonNull
         public static Object replay(@NonNull Object captured) {
             final Snapshot capturedSnapshot = (Snapshot) captured;
+            //
             return new Snapshot(replayTtlValues(capturedSnapshot.ttl2Value), replayThreadLocalValues(capturedSnapshot.threadLocal2Value));
         }
 
+        /**
+         * 重放 ttl 的值
+         * @param captured
+         * @return
+         */
         @NonNull
         private static HashMap<TransmittableThreadLocal<Object>, Object> replayTtlValues(@NonNull HashMap<TransmittableThreadLocal<Object>, Object> captured) {
             HashMap<TransmittableThreadLocal<Object>, Object> backup = new HashMap<>();
@@ -537,7 +579,9 @@ public class TransmittableThreadLocal<T> extends InheritableThreadLocal<T> imple
                 backup.put(threadLocal, threadLocal.get());
 
                 // clear the TTL values that is not in captured
+                // 清除未捕获的 TTL 值
                 // avoid the extra TTL values after replay when run task
+                // 避免运行任务时重放后的额外 TTL 值
                 if (!captured.containsKey(threadLocal)) {
                     iterator.remove();
                     threadLocal.superRemove();
@@ -588,6 +632,9 @@ public class TransmittableThreadLocal<T> extends InheritableThreadLocal<T> imple
             return replay(new Snapshot(ttl2Value, threadLocal2Value));
         }
 
+        /**
+         * 从 replay(Object)/clear() 恢复备份的 TransmittableThreadLocal 和注册的 ThreadLocal 值。
+         */
         /**
          * Restore the backup {@link TransmittableThreadLocal} and
          * registered {@link ThreadLocal} values from {@link #replay(Object)}/{@link #clear()}.

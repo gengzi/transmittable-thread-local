@@ -38,22 +38,37 @@ public final class TtlRunnable implements Runnable, TtlWrapper<Runnable>, TtlEnh
     private final Runnable runnable;
     private final boolean releaseTtlValueReferenceAfterRun;
 
+
+    /**
+     *
+     * 创建ttl runable
+     *
+     *
+     * @param runnable  真正运行任务的runnable
+     * @param releaseTtlValueReferenceAfterRun 运行后，是否释放ttl值
+     */
     private TtlRunnable(@NonNull Runnable runnable, boolean releaseTtlValueReferenceAfterRun) {
+        // 初始化 捕获当前 父线程设置的 threadlocal   的快照对象
         this.capturedRef = new AtomicReference<>(capture());
         this.runnable = runnable;
         this.releaseTtlValueReferenceAfterRun = releaseTtlValueReferenceAfterRun;
     }
 
+
+    /**
+     *  run 方法
+     */
     /**
      * wrap method {@link Runnable#run()}.
      */
     @Override
     public void run() {
+        //  获取快照对象
         final Object captured = capturedRef.get();
         if (captured == null || releaseTtlValueReferenceAfterRun && !capturedRef.compareAndSet(captured, null)) {
             throw new IllegalStateException("TTL value reference is released after run!");
         }
-
+        // 重放
         final Object backup = replay(captured);
         try {
             runnable.run();
